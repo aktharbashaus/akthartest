@@ -8,7 +8,6 @@ param create bool = true
 param appGatewayName string
 param skuName string = 'WAF_v2'
 param tier string = 'WAF_v2'
-param family string = 'Generation_2'
 param internalIpAddress string
 param managedIdentityName string
 param publicIpName string
@@ -38,7 +37,7 @@ param vnetResourceGroup string
 param subnetName string
 param sharedResourceGroup string
 
-// ── Existing resource references ──────────────────────────────
+// ── Existing resource references ─────────────────────────────
 resource managedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' existing = {
   name: managedIdentityName
   scope: resourceGroup(sharedResourceGroup)
@@ -49,7 +48,7 @@ resource publicIp 'Microsoft.Network/publicIPAddresses@2023-06-01' existing = {
   scope: resourceGroup(sharedResourceGroup)
 }
 
-resource wafPolicy 'Microsoft.Network/ApplicationGatewayWebApplicationFirewallPolicies@2023-06-01' existing = {
+resource wafPolicy 'Microsoft.Network/applicationGatewayWebApplicationFirewallPolicies@2023-06-01' existing = {
   name: wafPolicyName
   scope: resourceGroup(sharedResourceGroup)
 }
@@ -59,9 +58,6 @@ var subnetId = resourceId(vnetResourceGroup, 'Microsoft.Network/virtualNetworks/
 var internalFrontendIpName = '${appGatewayName}-internalip'
 var agwId = resourceId('Microsoft.Network/applicationGateways', appGatewayName)
 var kvBase = 'https://${keyVaultName}.vault.azure.net/secrets'
-
-// ── Helper: build sub-resource ID ────────────────────────────
-// Pattern: '${agwId}/<collection>/<name>'
 
 // ============================================================
 // RESOURCE
@@ -79,9 +75,8 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-06-01' = if (cre
   }
   properties: {
     sku: {
-      name: skuName
+      name: skuName   // FIX 1: removed invalid 'family' property
       tier: tier
-      family: family
     }
 
     autoscaleConfiguration: {
@@ -101,12 +96,14 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-06-01' = if (cre
       {
         name: 'appGatewayIpConfig'
         properties: {
-          subnet: { id: subnetId }
+          subnet: {
+            id: subnetId
+          }
         }
       }
     ]
 
-    // ── SSL Certificates (resolved from variables.json sslCerts array) ──
+    // ── SSL Certificates ─────────────────────────────────────
     sslCertificates: [for cert in sslCerts: {
       name: cert.name
       properties: {
@@ -120,7 +117,9 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-06-01' = if (cre
         name: 'appPublicFrontendIp'
         properties: {
           privateIPAllocationMethod: 'Dynamic'
-          publicIPAddress: { id: publicIp.id }
+          publicIPAddress: {
+            id: publicIp.id
+          }
         }
       }
       {
@@ -128,19 +127,36 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-06-01' = if (cre
         properties: {
           privateIPAddress: internalIpAddress
           privateIPAllocationMethod: 'Static'
-          subnet: { id: subnetId }
+          subnet: {
+            id: subnetId
+          }
         }
       }
     ]
 
     // ── Frontend Ports ───────────────────────────────────────
     frontendPorts: [
-      { name: 'port_80'  properties: { port: 80  } }
-      { name: 'port_443' properties: { port: 443 } }
-      { name: 'port_448' properties: { port: 448 } }
+      {
+        name: 'port_80'
+        properties: {
+          port: 80
+        }
+      }
+      {
+        name: 'port_443'
+        properties: {
+          port: 443
+        }
+      }
+      {
+        name: 'port_448'
+        properties: {
+          port: 448
+        }
+      }
     ]
 
-    // ── Backend Pools (from variables.json) ──────────────────
+    // ── Backend Pools ────────────────────────────────────────
     backendAddressPools: [for pool in backendAddressPools: {
       name: pool.name
       properties: {
@@ -148,24 +164,32 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-06-01' = if (cre
       }
     }]
 
-    // ── Backend HTTP Settings (from variables.json) ──────────
+    // ── Backend HTTP Settings ────────────────────────────────
+    // FIX 2: use union() to conditionally add probe — ARM rejects null values
     backendHttpSettingsCollection: [for s in backendHttpSettingsCollection: {
       name: s.name
-      properties: {
-        port: s.port
-        protocol: 'Https'
-        cookieBasedAffinity: 'Disabled'
-        hostName: s.hostName
-        pickHostNameFromBackendAddress: false
-        requestTimeout: s.requestTimeout
-        connectionDraining: { enabled: false drainTimeoutInSec: 1 }
-        probe: contains(s, 'probeName') ? {
-          id: '${agwId}/probes/${s.probeName}'
-        } : null
-      }
+      properties: union(
+        {
+          port: s.port
+          protocol: 'Https'
+          cookieBasedAffinity: 'Disabled'
+          hostName: s.hostName
+          pickHostNameFromBackendAddress: false
+          requestTimeout: s.requestTimeout
+          connectionDraining: {            // FIX 3: was inline one-liner, needs newlines
+            enabled: false
+            drainTimeoutInSec: 1
+          }
+        },
+        contains(s, 'probeName') ? {
+          probe: {
+            id: '${agwId}/probes/${s.probeName}'
+          }
+        } : {}                             // empty object = omit probe entirely
+      )
     }]
 
-    // ── Probes (from variables.json) ─────────────────────────
+    // ── Probes ───────────────────────────────────────────────
     probes: [for p in probes: {
       name: p.name
       properties: {
@@ -183,29 +207,38 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-06-01' = if (cre
       }
     }]
 
-    // ── HTTP Listeners (from variables.json) ─────────────────
+    // ── HTTP Listeners ───────────────────────────────────────
+    // FIX 4: use union() for optional firewallPolicy and sslCertificate
     httpListeners: [for lst in httpListeners: {
       name: lst.name
-      properties: {
-        firewallPolicy: lst.attachWafPolicy ? { id: wafPolicy.id } : null
-        frontendIPConfiguration: {
-          id: lst.frontendIPConfigurationName == 'appPublicFrontendIp'
-            ? '${agwId}/frontendIPConfigurations/appPublicFrontendIp'
-            : '${agwId}/frontendIPConfigurations/${internalFrontendIpName}'
-        }
-        frontendPort: {
-          id: '${agwId}/frontendPorts/${lst.frontendPortName}'
-        }
-        protocol: lst.protocol
-        hostName: lst.hostName
-        sslCertificate: !empty(lst.sslCertificateName) ? {
-          id: '${agwId}/sslCertificates/${lst.sslCertificateName}'
-        } : null
-        requireServerNameIndication: lst.requireServerNameIndication
-      }
+      properties: union(
+        {
+          frontendIPConfiguration: {
+            id: lst.frontendIPConfigurationName == 'appPublicFrontendIp'
+              ? '${agwId}/frontendIPConfigurations/appPublicFrontendIp'
+              : '${agwId}/frontendIPConfigurations/${internalFrontendIpName}'
+          }
+          frontendPort: {
+            id: '${agwId}/frontendPorts/${lst.frontendPortName}'
+          }
+          protocol: lst.protocol
+          hostName: lst.hostName
+          requireServerNameIndication: lst.requireServerNameIndication
+        },
+        lst.attachWafPolicy ? {
+          firewallPolicy: {
+            id: wafPolicy.id
+          }
+        } : {},
+        !empty(lst.sslCertificateName) ? {
+          sslCertificate: {
+            id: '${agwId}/sslCertificates/${lst.sslCertificateName}'
+          }
+        } : {}
+      )
     }]
 
-    // ── URL Path Maps (from variables.json) ──────────────────
+    // ── URL Path Maps ────────────────────────────────────────
     urlPathMaps: [for upm in urlPathMaps: {
       name: upm.name
       properties: {
@@ -230,47 +263,56 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-06-01' = if (cre
       }
     }]
 
-    // ── Routing Rules (from variables.json) ──────────────────
-    // WARNING: Fix duplicate priorities in variables.json before deploying
+    // ── Routing Rules ────────────────────────────────────────
+    // FIX 5: use union() for optional pool/settings/urlPathMap — ARM rejects null
     requestRoutingRules: [for rule in requestRoutingRules: {
       name: rule.name
-      properties: {
-        ruleType: rule.ruleType
-        priority: rule.priority
-        httpListener: {
-          id: '${agwId}/httpListeners/${rule.httpListenerName}'
-        }
-        backendAddressPool: rule.ruleType == 'Basic' ? {
-          id: '${agwId}/backendAddressPools/${rule.backendAddressPoolName}'
-        } : null
-        backendHttpSettings: rule.ruleType == 'Basic' ? {
-          id: '${agwId}/backendHttpSettingsCollection/${rule.backendHttpSettingsName}'
-        } : null
-        urlPathMap: rule.ruleType == 'PathBasedRouting' ? {
-          id: '${agwId}/urlPathMaps/${rule.urlPathMapName}'
-        } : null
-      }
+      properties: union(
+        {
+          ruleType: rule.ruleType
+          priority: rule.priority
+          httpListener: {
+            id: '${agwId}/httpListeners/${rule.httpListenerName}'
+          }
+        },
+        rule.ruleType == 'Basic' ? {
+          backendAddressPool: {
+            id: '${agwId}/backendAddressPools/${rule.backendAddressPoolName}'
+          }
+          backendHttpSettings: {
+            id: '${agwId}/backendHttpSettingsCollection/${rule.backendHttpSettingsName}'
+          }
+        } : {},
+        rule.ruleType == 'PathBasedRouting' ? {
+          urlPathMap: {
+            id: '${agwId}/urlPathMaps/${rule.urlPathMapName}'
+          }
+        } : {}
+      )
     }]
 
-    // ── Redirect Configurations (from variables.json) ────────
+    // ── Redirect Configurations ──────────────────────────────
     redirectConfigurations: [for rc in redirectConfigurations: {
       name: rc.name
-      properties: {
-        redirectType: rc.redirectType
-        targetUrl: rc.targetUrl
-        includePath: contains(rc, 'includePath') ? rc.includePath : false
-        includeQueryString: contains(rc, 'includeQueryString') ? rc.includeQueryString : false
-        requestRoutingRules: contains(rc, 'linkedRoutingRuleName') ? [
-          { id: '${agwId}/requestRoutingRules/${rc.linkedRoutingRuleName}' }
-        ] : []
-      }
+      properties: union(
+        {
+          redirectType: rc.redirectType
+          targetUrl: rc.targetUrl
+        },
+        contains(rc, 'includePath') ? { includePath: rc.includePath } : {},
+        contains(rc, 'includeQueryString') ? { includeQueryString: rc.includeQueryString } : {},
+        contains(rc, 'linkedRoutingRuleName') ? {
+          requestRoutingRules: [
+            { id: '${agwId}/requestRoutingRules/${rc.linkedRoutingRuleName}' }
+          ]
+        } : {}
+      )
     }]
 
-    // ── Rewrite Rules / Private Links ────────────────────────
+    // ── WAF / Rewrite / Private Link ─────────────────────────
     rewriteRuleSets: []
     privateLinkConfigurations: []
 
-    // ── WAF Configuration (from variables.json wafConfiguration) ──
     webApplicationFirewallConfiguration: {
       enabled: wafConfiguration.enabled
       firewallMode: wafConfiguration.firewallMode
