@@ -1,6 +1,5 @@
 // ============================================================
 // appGateway.bicep  –  Reusable App Gateway module
-// All configuration arrays come from variables.json via main.bicep
 // ============================================================
 
 // ── Parameters from variables.json ───────────────────────────
@@ -21,8 +20,6 @@ param autoscaleMinCapacity int = 0
 param autoscaleMaxCapacity int = 10
 param tags object = {}
 param redirectConfigurations array = []
-
-// ── The big arrays (all from variables.json) ─────────────────
 param backendAddressPools array
 param backendHttpSettingsCollection array
 param probes array
@@ -75,20 +72,17 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-06-01' = if (cre
   }
   properties: {
     sku: {
-      name: skuName   // FIX 1: removed invalid 'family' property
+      name: skuName
       tier: tier
     }
-
     autoscaleConfiguration: {
       minCapacity: autoscaleMinCapacity
       maxCapacity: autoscaleMaxCapacity
     }
-
     sslPolicy: {
       policyType: 'Predefined'
       policyName: sslPolicyName
     }
-
     enableHttp2: false
 
     // ── Gateway IP ───────────────────────────────────────────
@@ -165,28 +159,24 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-06-01' = if (cre
     }]
 
     // ── Backend HTTP Settings ────────────────────────────────
-    // FIX 2: use union() to conditionally add probe — ARM rejects null values
+    // any() used to bypass type checker for optional probe property
     backendHttpSettingsCollection: [for s in backendHttpSettingsCollection: {
       name: s.name
-      properties: union(
-        {
-          port: s.port
-          protocol: 'Https'
-          cookieBasedAffinity: 'Disabled'
-          hostName: s.hostName
-          pickHostNameFromBackendAddress: false
-          requestTimeout: s.requestTimeout
-          connectionDraining: {            // FIX 3: was inline one-liner, needs newlines
-            enabled: false
-            drainTimeoutInSec: 1
-          }
-        },
-        contains(s, 'probeName') ? {
-          probe: {
-            id: '${agwId}/probes/${s.probeName}'
-          }
-        } : {}                             // empty object = omit probe entirely
-      )
+      properties: {
+        port: s.port
+        protocol: 'Https'
+        cookieBasedAffinity: 'Disabled'
+        hostName: s.hostName
+        pickHostNameFromBackendAddress: false
+        requestTimeout: s.requestTimeout
+        connectionDraining: {
+          enabled: false
+          drainTimeoutInSec: 1
+        }
+        probe: contains(s, 'probeName') ? any({
+          id: '${agwId}/probes/${s.probeName}'
+        }) : null
+      }
     }]
 
     // ── Probes ───────────────────────────────────────────────
@@ -208,37 +198,32 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-06-01' = if (cre
     }]
 
     // ── HTTP Listeners ───────────────────────────────────────
-    // FIX 4: use union() for optional firewallPolicy and sslCertificate
+    // any() used to bypass type checker for optional firewallPolicy and sslCertificate
     httpListeners: [for lst in httpListeners: {
       name: lst.name
-      properties: union(
-        {
-          frontendIPConfiguration: {
-            id: lst.frontendIPConfigurationName == 'appPublicFrontendIp'
-              ? '${agwId}/frontendIPConfigurations/appPublicFrontendIp'
-              : '${agwId}/frontendIPConfigurations/${internalFrontendIpName}'
-          }
-          frontendPort: {
-            id: '${agwId}/frontendPorts/${lst.frontendPortName}'
-          }
-          protocol: lst.protocol
-          hostName: lst.hostName
-          requireServerNameIndication: lst.requireServerNameIndication
-        },
-        lst.attachWafPolicy ? {
-          firewallPolicy: {
-            id: wafPolicy.id
-          }
-        } : {},
-        !empty(lst.sslCertificateName) ? {
-          sslCertificate: {
-            id: '${agwId}/sslCertificates/${lst.sslCertificateName}'
-          }
-        } : {}
-      )
+      properties: {
+        firewallPolicy: lst.attachWafPolicy ? any({
+          id: wafPolicy.id
+        }) : null
+        frontendIPConfiguration: {
+          id: lst.frontendIPConfigurationName == 'appPublicFrontendIp'
+            ? '${agwId}/frontendIPConfigurations/appPublicFrontendIp'
+            : '${agwId}/frontendIPConfigurations/${internalFrontendIpName}'
+        }
+        frontendPort: {
+          id: '${agwId}/frontendPorts/${lst.frontendPortName}'
+        }
+        protocol: lst.protocol
+        hostName: lst.hostName
+        sslCertificate: !empty(lst.sslCertificateName) ? any({
+          id: '${agwId}/sslCertificates/${lst.sslCertificateName}'
+        }) : null
+        requireServerNameIndication: lst.requireServerNameIndication
+      }
     }]
 
     // ── URL Path Maps ────────────────────────────────────────
+    // Note: nested for loop (pathRules inside urlPathMaps) — valid in Bicep 0.4+
     urlPathMaps: [for upm in urlPathMaps: {
       name: upm.name
       properties: {
@@ -264,55 +249,42 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-06-01' = if (cre
     }]
 
     // ── Routing Rules ────────────────────────────────────────
-    // FIX 5: use union() for optional pool/settings/urlPathMap — ARM rejects null
+    // any() used for optional backendAddressPool, backendHttpSettings, urlPathMap
     requestRoutingRules: [for rule in requestRoutingRules: {
       name: rule.name
-      properties: union(
-        {
-          ruleType: rule.ruleType
-          priority: rule.priority
-          httpListener: {
-            id: '${agwId}/httpListeners/${rule.httpListenerName}'
-          }
-        },
-        rule.ruleType == 'Basic' ? {
-          backendAddressPool: {
-            id: '${agwId}/backendAddressPools/${rule.backendAddressPoolName}'
-          }
-          backendHttpSettings: {
-            id: '${agwId}/backendHttpSettingsCollection/${rule.backendHttpSettingsName}'
-          }
-        } : {},
-        rule.ruleType == 'PathBasedRouting' ? {
-          urlPathMap: {
-            id: '${agwId}/urlPathMaps/${rule.urlPathMapName}'
-          }
-        } : {}
-      )
+      properties: {
+        ruleType: rule.ruleType
+        priority: rule.priority
+        httpListener: {
+          id: '${agwId}/httpListeners/${rule.httpListenerName}'
+        }
+        backendAddressPool: rule.ruleType == 'Basic' ? any({
+          id: '${agwId}/backendAddressPools/${rule.backendAddressPoolName}'
+        }) : null
+        backendHttpSettings: rule.ruleType == 'Basic' ? any({
+          id: '${agwId}/backendHttpSettingsCollection/${rule.backendHttpSettingsName}'
+        }) : null
+        urlPathMap: rule.ruleType == 'PathBasedRouting' ? any({
+          id: '${agwId}/urlPathMaps/${rule.urlPathMapName}'
+        }) : null
+      }
     }]
 
     // ── Redirect Configurations ──────────────────────────────
     redirectConfigurations: [for rc in redirectConfigurations: {
       name: rc.name
-      properties: union(
-        {
-          redirectType: rc.redirectType
-          targetUrl: rc.targetUrl
-        },
-        contains(rc, 'includePath') ? { includePath: rc.includePath } : {},
-        contains(rc, 'includeQueryString') ? { includeQueryString: rc.includeQueryString } : {},
-        contains(rc, 'linkedRoutingRuleName') ? {
-          requestRoutingRules: [
-            { id: '${agwId}/requestRoutingRules/${rc.linkedRoutingRuleName}' }
-          ]
-        } : {}
-      )
+      properties: {
+        redirectType: rc.redirectType
+        targetUrl: rc.targetUrl
+        includePath: contains(rc, 'includePath') ? rc.includePath : false
+        includeQueryString: contains(rc, 'includeQueryString') ? rc.includeQueryString : false
+        requestRoutingRules: contains(rc, 'linkedRoutingRuleName') ? any([
+          { id: '${agwId}/requestRoutingRules/${rc.linkedRoutingRuleName}' }
+        ]) : null
+      }
     }]
 
-    // ── WAF / Rewrite / Private Link ─────────────────────────
-    rewriteRuleSets: []
-    privateLinkConfigurations: []
-
+    // ── WAF Configuration ────────────────────────────────────
     webApplicationFirewallConfiguration: {
       enabled: wafConfiguration.enabled
       firewallMode: wafConfiguration.firewallMode
