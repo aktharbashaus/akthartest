@@ -1,0 +1,87 @@
+{
+  "_description": "Environment-wide defaults for ODH App Gateway deployment. Values here apply across all apps in each environment. App-specific config stays in variables.json.",
+
+  "dev": {
+    "location": "eastus",
+    "subscriptionId": "3bccba-a080-4662-ba05-133a3d87e004",
+    "sharedResourceGroup": "ndhapps-dev-shared-rg",
+
+    "vnet": {
+      "name": "PrimaryVNet1",
+      "resourceGroup": "Network101"
+    },
+
+    "appGateway": {
+      "subnetName": "ODH_AGS_AppGateway_Dev_Subnet",
+      "internalIpAddress": "10.242.62.25",
+      "aseHostSuffix": "ndhappsdev.appserviceenvironment.net",
+      "publicIpName": "ndhappsdev-ags-public-ip",
+      "managedIdentityName": "ndhappsdev-ags-id",
+      "wafPolicyName": "dev-detection",
+      "keyVaultName": "odh-ssl-certs"
+    }
+  },
+
+  "tst": {
+    "location": "eastus",
+    "subscriptionId": "TODO-tst-subscription-id",
+    "sharedResourceGroup": "ndhapps-tst-shared-rg",
+
+    "vnet": {
+      "name": "PrimaryVNet1",
+      "resourceGroup": "Network101"
+    },
+
+    "appGateway": {
+      "subnetName": "ODH_AGS_AppGateway_Tst_Subnet",
+      "internalIpAddress": "TODO-tst-internal-ip",
+      "aseHostSuffix": "ndhappstst.appserviceenvironment.net",
+      "publicIpName": "ndhappstst-ags-public-ip",
+      "managedIdentityName": "ndhappstst-ags-id",
+      "wafPolicyName": "tst-detection",
+      "keyVaultName": "odh-ssl-certs"
+    }
+  },
+
+  "stg": {
+    "location": "eastus",
+    "subscriptionId": "TODO-stg-subscription-id",
+    "sharedResourceGroup": "ndhapps-stg-shared-rg",
+
+    "vnet": {
+      "name": "PrimaryVNet1",
+      "resourceGroup": "Network101"
+    },
+
+    "appGateway": {
+      "subnetName": "ODH_AGS_AppGateway_Stg_Subnet",
+      "internalIpAddress": "TODO-stg-internal-ip",
+      "aseHostSuffix": "ndhappsstg.appserviceenvironment.net",
+      "publicIpName": "ndhappsstg-ags-public-ip",
+      "managedIdentityName": "ndhappsstg-ags-id",
+      "wafPolicyName": "stg-prevention",
+      "keyVaultName": "odh-ssl-certs"
+    }
+  },
+
+  "prd": {
+    "location": "eastus",
+    "subscriptionId": "TODO-prd-subscription-id",
+    "sharedResourceGroup": "ndhapps-prd-shared-rg",
+
+    "vnet": {
+      "name": "PrimaryVNet1",
+      "resourceGroup": "Network101"
+    },
+
+    "appGateway": {
+      "subnetName": "ODH_AGS_AppGateway_Prd_Subnet",
+      "internalIpAddress": "TODO-prd-internal-ip",
+      "aseHostSuffix": "ndhappsprd.appserviceenvironment.net",
+      "publicIpName": "ndhappsprd-ags-public-ip",
+      "managedIdentityName": "ndhappsprd-ags-id",
+      "wafPolicyName": "prd-prevention",
+      "keyVaultName": "odh-ssl-certs"
+    }
+  }
+}
