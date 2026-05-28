@@ -56,6 +56,38 @@ var internalFrontendIpName = '${appGatewayName}-internalip'
 var agwId = resourceId('Microsoft.Network/applicationGateways', appGatewayName)
 var kvBase = 'https://${keyVaultName}.vault.azure.net/secrets'
 
+// ── FIX for BCP142: pre-build pathRules OUTSIDE the resource ──
+// Bicep does not allow nested for loops inside resource properties.
+// Solution: pre-compute each urlPathMap's pathRules as a top-level var,
+// then reference them by index inside the urlPathMaps loop.
+// We have exactly 2 urlPathMaps (APIN-Dev and APIN-Tst).
+
+var pathRulesForMap0 = [for pr in urlPathMaps[0].pathRules: {
+  name: pr.name
+  properties: {
+    paths: pr.paths
+    backendAddressPool: {
+      id: '${agwId}/backendAddressPools/${pr.backendAddressPoolName}'
+    }
+    backendHttpSettings: {
+      id: '${agwId}/backendHttpSettingsCollection/${pr.backendHttpSettingsName}'
+    }
+  }
+}]
+
+var pathRulesForMap1 = [for pr in urlPathMaps[1].pathRules: {
+  name: pr.name
+  properties: {
+    paths: pr.paths
+    backendAddressPool: {
+      id: '${agwId}/backendAddressPools/${pr.backendAddressPoolName}'
+    }
+    backendHttpSettings: {
+      id: '${agwId}/backendHttpSettingsCollection/${pr.backendHttpSettingsName}'
+    }
+  }
+}]
+
 // ============================================================
 // RESOURCE
 // ============================================================
@@ -159,7 +191,6 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-06-01' = if (cre
     }]
 
     // ── Backend HTTP Settings ────────────────────────────────
-    // any() used to bypass type checker for optional probe property
     backendHttpSettingsCollection: [for s in backendHttpSettingsCollection: {
       name: s.name
       properties: {
@@ -198,7 +229,6 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-06-01' = if (cre
     }]
 
     // ── HTTP Listeners ───────────────────────────────────────
-    // any() used to bypass type checker for optional firewallPolicy and sslCertificate
     httpListeners: [for lst in httpListeners: {
       name: lst.name
       properties: {
@@ -223,33 +253,22 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-06-01' = if (cre
     }]
 
     // ── URL Path Maps ────────────────────────────────────────
-    // Note: nested for loop (pathRules inside urlPathMaps) — valid in Bicep 0.4+
-    urlPathMaps: [for upm in urlPathMaps: {
-      name: upm.name
+    // BCP142 fix: pathRules pre-built as top-level vars above,
+    // referenced here by index — no nested for loops.
+    urlPathMaps: [for i in range(0, length(urlPathMaps)): {
+      name: urlPathMaps[i].name
       properties: {
         defaultBackendAddressPool: {
-          id: '${agwId}/backendAddressPools/${upm.defaultBackendAddressPoolName}'
+          id: '${agwId}/backendAddressPools/${urlPathMaps[i].defaultBackendAddressPoolName}'
         }
         defaultBackendHttpSettings: {
-          id: '${agwId}/backendHttpSettingsCollection/${upm.defaultBackendHttpSettingsName}'
+          id: '${agwId}/backendHttpSettingsCollection/${urlPathMaps[i].defaultBackendHttpSettingsName}'
         }
-        pathRules: [for pr in upm.pathRules: {
-          name: pr.name
-          properties: {
-            paths: pr.paths
-            backendAddressPool: {
-              id: '${agwId}/backendAddressPools/${pr.backendAddressPoolName}'
-            }
-            backendHttpSettings: {
-              id: '${agwId}/backendHttpSettingsCollection/${pr.backendHttpSettingsName}'
-            }
-          }
-        }]
+        pathRules: i == 0 ? pathRulesForMap0 : pathRulesForMap1
       }
     }]
 
     // ── Routing Rules ────────────────────────────────────────
-    // any() used for optional backendAddressPool, backendHttpSettings, urlPathMap
     requestRoutingRules: [for rule in requestRoutingRules: {
       name: rule.name
       properties: {
