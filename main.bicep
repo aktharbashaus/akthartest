@@ -1,7 +1,7 @@
 // ============================================================
 // main.bicep  –  Entry point for App Gateway deployment
 // Parameters sourced from:
-//   variables.json          (app-specific config + all arrays)
+//   variables.json           (app-specific config + all arrays)
 //   environmentDefaults.json (env-wide networking config)
 // ============================================================
 
@@ -10,7 +10,6 @@ param create bool = true
 param appGatewayName string = 'ndhappsdev-ags'
 param skuName string = 'WAF_v2'
 param tier string = 'WAF_v2'
-param family string = 'Generation_2'
 param internalIpAddress string = '10.242.62.25'
 param managedIdentityName string = 'ndhappsdev-ags-id'
 param publicIpName string = 'ndhappsdev-ags-public-ip'
@@ -24,8 +23,6 @@ param autoscaleMinCapacity int = 0
 param autoscaleMaxCapacity int = 10
 param tags object = { agency: 'odh' }
 param redirectConfigurations array = []
-
-// ── Big arrays from variables.json ───────────────────────────
 param backendAddressPools array
 param backendHttpSettingsCollection array
 param probes array
@@ -48,7 +45,6 @@ module appGatewayModule './appGateway.bicep' = {
     appGatewayName:                  appGatewayName
     skuName:                         skuName
     tier:                            tier
-    family:                          family
     internalIpAddress:               internalIpAddress
     managedIdentityName:             managedIdentityName
     publicIpName:                    publicIpName
