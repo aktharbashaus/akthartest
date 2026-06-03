@@ -1,16 +1,4 @@
-# Apps
-az webapp list \
+az webapp slot list \
   --resource-group odhapps-sbx-odrs-rg \
-  --query "[].{Name:name, Type:'App', PrincipalId:identity.principalId}" \
+  --query "[].{AppName:name, Slot:slot, PrincipalId:identity.principalId}" \
   -o table
-
-# Slots  
-az webapp list \
-  --resource-group odhapps-sbx-odrs-rg \
-  --query "[].name" -o tsv | while read app; do
-  az webapp deployment slot list \
-    --name $app \
-    --resource-group odhapps-sbx-odrs-rg \
-    --query "[].{App:'$app', Slot:name, PrincipalId:identity.principalId}" \
-    -o table
-done
