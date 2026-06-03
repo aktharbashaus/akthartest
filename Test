@@ -1,4 +1,16 @@
-az role assignment list \
-  --scope "/subscriptions/53ccabae-a699-4662-ba45-132a3d87e604/resourceGroups/odhapps-sbx-odrs-rg/providers/Microsoft.KeyVault/vaults/odrs-sbx-kv" \
-  --query "[].{name:name,principalId:principalId,principalType:principalType}" \
+# Apps
+az webapp list \
+  --resource-group odhapps-sbx-odrs-rg \
+  --query "[].{Name:name, Type:'App', PrincipalId:identity.principalId}" \
   -o table
+
+# Slots  
+az webapp list \
+  --resource-group odhapps-sbx-odrs-rg \
+  --query "[].name" -o tsv | while read app; do
+  az webapp deployment slot list \
+    --name $app \
+    --resource-group odhapps-sbx-odrs-rg \
+    --query "[].{App:'$app', Slot:name, PrincipalId:identity.principalId}" \
+    -o table
+done
