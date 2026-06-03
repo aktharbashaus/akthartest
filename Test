@@ -1,9 +1,8 @@
 az role assignment show \
-  --id "/subscriptions/53ccabae-a699-4662-ba45-132a3d87e604/resourceGroups/odhapps-dev-odrs-rg/providers/Microsoft.Authorization/roleAssignments/916252dbb3e2560aacaf8183f0420dcf" \
-  --query "{
-    principalId:principalId,
-    principalType:principalType,
-    roleDefinitionName:roleDefinitionName,
-    scope:scope
-  }" \
+  --id "/subscriptions/53ccabae-a699-4662-ba45-132a3d87e604/resourceGroups/odhapps-sbx-odrs-rg/providers/Microsoft.Authorization/roleAssignments/cf8bca5f8384518bbc306b057be428b0" \
   -o jsonc
+
+# See ALL existing assignments on this vault
+az role assignment list \
+  --scope "/subscriptions/53ccabae-a699-4662-ba45-132a3d87e604/resourceGroups/odhapps-sbx-odrs-rg/providers/Microsoft.KeyVault/vaults/odrs-sbx-kv" \
+  -o table
