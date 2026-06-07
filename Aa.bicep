@@ -1,33 +1,14 @@
-// Add these existing resources in keyVault.bicep
-resource callerPrincipalApp 'Microsoft.Web/sites@2022-09-01' existing = 
-  [for (permission, i) in permissions: 
-    if (empty(permission.principalSlotName) && 
-        !empty(permission.principalResourceName)) {
-  name: permission.principalResourceName
-  scope: resourceGroup(permission.principalResourceGroup 
-    ?? resourceGroup().name)
-}]
-
-resource callerPrincipalSlot 'Microsoft.Web/sites/slots@2022-09-01' existing = 
-  [for (permission, i) in permissions: 
-    if (!empty(permission.principalSlotName) && 
-        !empty(permission.principalResourceName)) {
-  name: '${permission.principalResourceName}/${permission.principalSlotName}'
-  scope: resourceGroup(permission.principalResourceGroup 
-    ?? resourceGroup().name)
-}]
-
-// Then in keyVaultRbacAccessModule pass resolved principalId
-module keyVaultRbacAccessModule './keyVaultRbacAccess.bicep' = 
-  [for (projectPermission, i) in permissions: 
-    if (enableRbacAuthorization) {
-  name: 'keyVaultRbacAccess-${i}-...'
-  params: {
-    // existing params
-    managedIdentityPrincipalId: !empty(projectPermission.objectId)
-      ? projectPermission.objectId  // Group/SP with known objectId ✅
-      : !empty(projectPermission.principalSlotName)
-        ? callerPrincipalSlot[i].identity.principalId  // slot ✅
-        : callerPrincipalApp[i].identity.principalId   // app ✅
+// Remove pathRulesForMap0/1/2 vars entirely
+// Replace urlPathMaps with simple loop
+urlPathMaps: [for upm in urlPathMaps: {
+  name: upm.name
+  properties: {
+    defaultBackendAddressPool: {
+      id: '${agwId}/backendAddressPools/${upm.defaultBackendAddressPoolName}'
+    }
+    defaultBackendHttpSettings: {
+      id: '${agwId}/backendHttpSettingsCollection/${upm.defaultBackendHttpSettingsName}'
+    }
+    pathRules: upm.pathRules  // already has full ARM format from variables.json
   }
 }]
