@@ -241,21 +241,30 @@ for upm in props.get("urlPathMaps", []):
     up = p(upm)
     path_rules = []
     for pr in up.get("pathRules", []):
-        pr_props = p(pr)
-        # FIX: try multiple ways to get paths
+        # FIX: handle both ARM nested format (properties.paths)
+        # and Azure CLI flat format (paths directly on object)
+        pr_nested = pr.get("properties", {})  # ARM export format
+        pr_flat   = p(pr)                      # CLI flat format
+
+        # Try nested first (ARM export), then flat (CLI)
         paths = (
-            pr_props.get("paths") or
+            pr_nested.get("paths") or
+            pr_flat.get("paths") or
             pr.get("paths") or
             []
         )
-        # FIX: ensure paths is a list not None
-        if not paths:
+        if not isinstance(paths, list):
             paths = []
+
+        # Get backend refs - try both formats
+        pool_id     = (pr_nested.get("backendAddressPool")  or pr_flat.get("backendAddressPool",  {})).get("id", "")
+        settings_id = (pr_nested.get("backendHttpSettings") or pr_flat.get("backendHttpSettings", {})).get("id", "")
+
         path_rules.append({
             "name":                    pr["name"],
             "paths":                   paths,
-            "backendAddressPoolName":  id_name(pr_props.get("backendAddressPool",  {}).get("id", ""), "backendAddressPools"),
-            "backendHttpSettingsName": id_name(pr_props.get("backendHttpSettings", {}).get("id", ""), "backendHttpSettingsCollection")
+            "backendAddressPoolName":  id_name(pool_id,     "backendAddressPools"),
+            "backendHttpSettingsName": id_name(settings_id, "backendHttpSettingsCollection")
         })
     url_path_maps.append({
         "name":                           upm["name"],
