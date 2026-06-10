@@ -1,4 +1,4 @@
-var allPathRules = [for upm in urlPathMaps: [for pr in upm.pathRules: {
+var allPathRules = map(urlPathMaps, upm => map(upm.pathRules, pr => {
   name: pr.name
   properties: {
     paths: pr.paths
@@ -9,4 +9,4 @@ var allPathRules = [for upm in urlPathMaps: [for pr in upm.pathRules: {
       id: '${agwId}/backendHttpSettingsCollection/${pr.backendHttpSettingsName}'
     }
   }
-}]]
+}))
