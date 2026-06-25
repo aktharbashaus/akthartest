@@ -1,52 +1,91 @@
-import json
+import json, subprocess, copy
 
-# --- Load both files ---
-with open('variables.json') as f:
-    dev = json.load(f)
-with open('variablesprd.json') as f:
-    prd = json.load(f)
+GATEWAY = "odhappsprd-agw"
+RG = "odhapps-prd-shared-rg"
+FILE = "environmentDefaults.json"
 
-# Adjust if your values sit under "parameters"
-dev_p = dev.get('parameters', dev)
-prd_p = prd.get('parameters', prd)
+# --- 1. Pull full live prod gateway ---
+result = subprocess.run(
+    ["az", "network", "application-gateway", "show",
+     "--name", GATEWAY, "--resource-group", RG, "-o", "json"],
+    capture_output=True, text=True
+)
+if result.returncode != 0:
+    print("az failed:", result.stderr); exit(1)
 
-shared = {}      # identical in both -> variables.new.json
-dev_only = {}    # env-specific -> environmentDefaults dev block
-prd_only = {}    # env-specific -> environmentDefaults prd block
+gw = json.loads(result.stdout)
+p = gw.get("properties", gw)
 
-all_keys = set(dev_p.keys()) | set(prd_p.keys())
+def last_seg(resource_id):
+    return resource_id.rstrip("/").split("/")[-1] if resource_id else None
 
-for k in sorted(all_keys):
-    in_dev = k in dev_p
-    in_prd = k in prd_p
+# --- 2. Transform ARM format -> your flat structure ---
+# Adjust field names to match exactly what your bicep/defaults expect
+frontendPorts = sorted(
+    [{"name": x["name"], "port": x["properties"]["port"]} for x in p.get("frontendPorts", [])],
+    key=lambda r: r["port"])
 
-    if in_dev and in_prd:
-        if dev_p[k] == prd_p[k]:
-            shared[k] = dev_p[k]            # same -> shared
-        else:
-            dev_only[k] = dev_p[k]          # differs -> env-specific
-            prd_only[k] = prd_p[k]
-    elif in_dev:
-        dev_only[k] = dev_p[k]              # dev only
-    else:
-        prd_only[k] = prd_p[k]              # prd only
+backendAddressPools = [
+    {"name": x["name"],
+     "backendAddresses": x["properties"].get("backendAddresses", [])}
+    for x in p.get("backendAddressPools", [])]
 
-# --- Write shared variables ---
-with open('variables.new.json', 'w') as f:
-    json.dump({'parameters': shared}, f, indent=2)
+httpListeners = [
+    {"name": x["name"],
+     "frontendPortName": last_seg(x["properties"].get("frontendPort", {}).get("id")),
+     "protocol": x["properties"].get("protocol"),
+     "hostName": x["properties"].get("hostName", ""),
+     "sslCertificateName": last_seg(x["properties"].get("sslCertificate", {}).get("id")) if x["properties"].get("sslCertificate") else "",
+     "requireServerNameIndication": x["properties"].get("requireServerNameIndication", False)}
+    for x in p.get("httpListeners", [])]
 
-# --- Write environment defaults ---
-env_defaults = {
-    'environmentDetails': {
-        'dev': dev_only,
-        'prd': prd_only
-    }
+requestRoutingRules = [
+    {"name": x["name"],
+     "ruleType": x["properties"].get("ruleType"),
+     "priority": x["properties"].get("priority"),
+     "httpListenerName": last_seg(x["properties"].get("httpListener", {}).get("id")),
+     "backendAddressPoolName": last_seg(x["properties"].get("backendAddressPool", {}).get("id")) if x["properties"].get("backendAddressPool") else "",
+     "redirectConfigurationName": last_seg(x["properties"].get("redirectConfiguration", {}).get("id")) if x["properties"].get("redirectConfiguration") else ""}
+    for x in p.get("requestRoutingRules", [])]
+
+live = {
+    "frontendPorts": frontendPorts,
+    "backendAddressPools": backendAddressPools,
+    "httpListeners": httpListeners,
+    "requestRoutingRules": requestRoutingRules,
+    # add probes, urlPathMaps, redirectConfigurations, sslCerts similarly
 }
-with open('environmentDefaults.new.json', 'w') as f:
-    json.dump(env_defaults, f, indent=2)
 
-# --- Summary ---
-print(f"Shared keys (-> variables.new.json):        {len(shared)}")
-print(f"Dev-specific keys (-> environmentDefaults): {len(dev_only)}")
-print(f"Prd-specific keys (-> environmentDefaults): {len(prd_only)}")
-print("\nReview variables.new.json and environmentDefaults.new.json before replacing originals.")
+# --- 3. Compare against current prd block (CHECK mode) ---
+with open(FILE) as f:
+    data = json.load(f)
+
+prd = data["environmentDetails"]["prd"]
+
+def unwrap(v):  # handle {"value":[...]} wrapper
+    return v["value"] if isinstance(v, dict) and "value" in v else v
+
+print("=== DIFFERENCE CHECK (prod config vs live) ===\n")
+for key, live_val in live.items():
+    cur = unwrap(prd.get(key, []))
+    live_names = {i.get("name") for i in live_val}
+    cur_names = {i.get("name") for i in cur}
+    added = live_names - cur_names
+    removed = cur_names - live_names
+    if added: print(f"[{key}] LIVE has, config missing: {added}")
+    if removed: print(f"[{key}] config has, LIVE missing: {removed}")
+    if not added and not removed: print(f"[{key}] names match ({len(live_names)} items)")
+
+# --- 4. Write updated file for review (does NOT overwrite original) ---
+new = copy.deepcopy(data)
+for key, live_val in live.items():
+    if isinstance(new["environmentDetails"]["prd"].get(key), dict) and "value" in new["environmentDetails"]["prd"][key]:
+        new["environmentDetails"]["prd"][key]["value"] = live_val
+    else:
+        new["environmentDetails"]["prd"][key] = live_val
+
+with open("environmentDefaults.updated.json", "w") as f:
+    json.dump(new, f, indent=2)
+
+print("\nWritten environmentDefaults.updated.json (review before using).")
+print("Run: diff environmentDefaults.json environmentDefaults.updated.json")
